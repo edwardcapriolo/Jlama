@@ -23,6 +23,7 @@ import com.github.tjake.jlama.safetensors.DType;
 import com.github.tjake.jlama.safetensors.WeightLoader;
 import com.github.tjake.jlama.safetensors.tokenizer.Tokenizer;
 import com.github.tjake.jlama.tensor.AbstractTensor;
+import com.github.tjake.jlama.tensor.TensorCache;
 import com.github.tjake.jlama.tensor.operations.TensorOperationsProvider;
 import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
@@ -89,11 +90,9 @@ public class LlamaModel extends AbstractModel {
                 return embedding;
             } else {
                 AbstractTensor at = wte.slice(true, inputToken);
-                AbstractTensor embedding = at.copyShape();
-
+                AbstractTensor embedding = TensorCache.instance.getDirty(at.dType(), at.shape());
                 // Always copy the entire embedding
                 embedding.copyFrom(at, 0, 0, c.embeddingLength);
-
                 return embedding;
             }
         };

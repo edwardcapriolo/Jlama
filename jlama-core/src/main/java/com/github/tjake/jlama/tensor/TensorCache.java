@@ -72,16 +72,8 @@ public class TensorCache {
         this.availableByShape = Maps.newConcurrentMap();
     }
 
-    public AbstractTensor get(DType dType, TensorShape shape) {
-        MpmcUnboundedXaddArrayQueue<AbstractTensor> availableQueue = availableByShape.computeIfAbsent(
-            new ShapeKey(dType, shape),
-            queueFactory
-        );
-        AbstractTensor t = availableQueue.poll();
-
-        if (t != null) return t;
-
-        t = switch (dType) {
+    private AbstractTensor internalGet(DType dType, TensorShape shape){
+        AbstractTensor t = switch (dType) {
             case F32 -> new FloatBufferTensor(shape);
             case F16 -> new Float16BufferTensor(shape);
             case BF16 -> new BFloat16BufferTensor(shape);
@@ -89,20 +81,50 @@ public class TensorCache {
             case Q4 -> new Q4ByteBufferTensor(shape);
             default -> throw new RuntimeException("Unsupported tensor type: " + dType);
         };
-
-        // Assign to this cache or just over allocate
         if (currentBytes.addAndGet(t.size()) < bytesCapacity) {
             t.setOwnerCache(this);
         } else {
             logger.debug("Full!");
             currentBytes.addAndGet(-t.size());
         }
-
         return t;
     }
 
+    /**
+     * @return a tensor of a specific shape but possibly reused so it is up to the user to clear it. This is
+     * useful when the user knows they will overwrite the entire array
+     */
+    public AbstractTensor<?,?> getDirty(DType dType, TensorShape shape){
+        MpmcUnboundedXaddArrayQueue<AbstractTensor> availableQueue = availableByShape.computeIfAbsent(
+                new ShapeKey(dType, shape),
+                queueFactory
+        );
+        AbstractTensor<?,?> t = availableQueue.poll();
+        if (t != null) {
+            return t;
+        }
+        return internalGet(dType, shape);
+    }
+
+    /**
+     *
+     * @return returns a tensor of the given type and shape, if the cache was full
+     * the ownerCache will be null.
+     */
+    public AbstractTensor get(DType dType, TensorShape shape) {
+        MpmcUnboundedXaddArrayQueue<AbstractTensor> availableQueue = availableByShape.computeIfAbsent(
+                new ShapeKey(dType, shape),
+                queueFactory
+        );
+        AbstractTensor t = availableQueue.poll();
+        if (t != null) {
+            t.clear();
+            return t;
+        }
+        return internalGet(dType, shape);
+    }
+
     void release(AbstractTensor b) {
-        b.clear();
         MpmcUnboundedXaddArrayQueue<AbstractTensor> availableQueue = availableByShape.computeIfAbsent(
             new ShapeKey(b.dType(), b.shape()),
             queueFactory
