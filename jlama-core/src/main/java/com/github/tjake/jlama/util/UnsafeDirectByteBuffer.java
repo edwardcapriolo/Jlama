@@ -15,26 +15,32 @@
  */
 package com.github.tjake.jlama.util;
 
-import java.nio.Buffer;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import org.jctools.util.UnsafeAccess;
 
 public class UnsafeDirectByteBuffer {
-    private static final long addressOffset;
+    private static final VarHandle VAR_HANDLE_ADDRESS;
     public static final int CACHE_LINE_SIZE = 64;
 
     static {
         try {
-            addressOffset = UnsafeAccess.UNSAFE.objectFieldOffset(Buffer.class.getDeclaredField("address"));
-        } catch (Exception e) {
+            VAR_HANDLE_ADDRESS = MethodHandles
+                    .privateLookupIn(ByteBuffer.class, MethodHandles.lookup()).findVarHandle(ByteBuffer.class,
+                            "address", long.class);
+        } catch (RuntimeException | IllegalAccessException | NoSuchFieldException e) {
             throw new RuntimeException(e);
         }
     }
 
     public static long getAddress(ByteBuffer buffy) {
-        return UnsafeAccess.UNSAFE.getLong(buffy, addressOffset);
+        if (VAR_HANDLE_ADDRESS != null) {
+            return (Long) VAR_HANDLE_ADDRESS.get(buffy);
+        }
+        throw new IllegalArgumentException("unreachable");
     }
+
 
     public static ByteBuffer allocateAlignedByteBuffer(int capacity, long align) {
         if (Long.bitCount(align) != 1) {
@@ -57,10 +63,7 @@ public class UnsafeDirectByteBuffer {
             int newLimit = newPosition + capacity;
             // limit to the capacity specified
             buffy.limit(newLimit);
-            // set order to native while we are here.
-            ByteBuffer slice = buffy.slice().order(ByteOrder.nativeOrder());
-            // the slice is now an aligned buffer of the required capacity
-            return slice;
+            return buffy.slice().order(ByteOrder.nativeOrder());
         }
     }
 }
